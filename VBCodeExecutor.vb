@@ -8,7 +8,7 @@ Imports Microsoft.CodeAnalysis.Emit
 
 Public Module VBCodeExecutor
 
-    Public Function ExecuteVBCode(vbCodeString As String) As String
+    Public Function ExecuteVBCode(vbCodeString As String, ParamArray parameters As Object()) As String
         Try
             Dim syntaxTree As SyntaxTree = VisualBasicSyntaxTree.ParseText(vbCodeString)
             
@@ -61,9 +61,22 @@ Public Module VBCodeExecutor
                         Return "Error: No types found in compiled assembly. Make sure your code includes a Module or Class."
                     End If
                     
-                    Dim method = type.GetMethods(BindingFlags.Public Or BindingFlags.Static).FirstOrDefault()
-                    If method Is Nothing Then
-                        Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
+                    Dim methods = type.GetMethods(BindingFlags.Public Or BindingFlags.Static)
+                    Dim method As MethodInfo = Nothing
+                    
+                    If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
+                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = parameters.Length)
+                        If method Is Nothing Then
+                            Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
+                        End If
+                    Else
+                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = 0)
+                        If method Is Nothing Then
+                            method = methods.FirstOrDefault()
+                            If method Is Nothing Then
+                                Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
+                            End If
+                        End If
                     End If
                     
                     Dim originalOut As TextWriter = Console.Out
@@ -75,7 +88,7 @@ Public Module VBCodeExecutor
                             Console.SetOut(sw)
                             Console.SetError(sw)
                             
-                            Dim methodResult As Object = method.Invoke(Nothing, Nothing)
+                            Dim methodResult As Object = method.Invoke(Nothing, parameters)
                             
                             Console.SetOut(originalOut)
                             Console.SetError(originalError)
