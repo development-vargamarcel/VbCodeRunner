@@ -1,16 +1,60 @@
 Public Module VBCodeExecutor
 
-    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object)) As String
+    ''' <summary>
+    ''' Custom TextWriter that redirects output to an Action callback
+    ''' </summary>
+    Private Class ActionTextWriter
+        Inherits System.IO.TextWriter
+
+        Private ReadOnly _logAction As System.Action(Of String)
+        Private ReadOnly _buffer As New System.Text.StringBuilder()
+
+        Public Sub New(logAction As System.Action(Of String))
+            _logAction = logAction
+        End Sub
+
+        Public Overrides Sub Write(value As Char)
+            _buffer.Append(value)
+            If value = ControlChars.Lf Then
+                Flush()
+            End If
+        End Sub
+
+        Public Overrides Sub WriteLine(value As String)
+            _buffer.Append(value)
+            _buffer.Append(System.Environment.NewLine)
+            Flush()
+        End Sub
+
+        Public Overrides Sub Flush()
+            If _buffer.Length > 0 Then
+                _logAction?.Invoke(_buffer.ToString())
+                _buffer.Clear()
+            End If
+        End Sub
+
+        Public Overrides ReadOnly Property Encoding As System.Text.Encoding
+            Get
+                Return System.Text.Encoding.UTF8
+            End Get
+        End Property
+    End Class
+
+    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
         Try
             Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
-            Return ExecuteVBCodeInternal(modifiedCode, Nothing)
+            Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
         Catch ex As System.Exception
             Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
         End Try
     End Function
 
+    Public Function ExecuteVBCode(vbCodeString As String, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, customLogger)
+    End Function
+
     Public Function ExecuteVBCode(vbCodeString As String, ParamArray parameters As Object()) As String
-        Return ExecuteVBCodeInternal(vbCodeString, parameters)
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing)
     End Function
 
     Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object)) As String
@@ -72,7 +116,7 @@ Public Module VBCodeExecutor
         Return vbCodeString
     End Function
 
-    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object()) As String
+    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
         Try
             Dim syntaxTree As Microsoft.CodeAnalysis.SyntaxTree = Microsoft.CodeAnalysis.VisualBasic.VisualBasicSyntaxTree.ParseText(vbCodeString)
 
@@ -148,14 +192,26 @@ Public Module VBCodeExecutor
 
                     Try
                         Dim outputBuilder As New System.Text.StringBuilder()
-                        Using sw As New System.IO.StringWriter(outputBuilder)
-                            System.Console.SetOut(sw)
-                            System.Console.SetError(sw)
+                        Dim outputWriter As System.IO.TextWriter
+
+                        ' Use custom logger if provided, otherwise use default StringWriter
+                        If customLogger IsNot Nothing Then
+                            outputWriter = New ActionTextWriter(customLogger)
+                        Else
+                            outputWriter = New System.IO.StringWriter(outputBuilder)
+                        End If
+
+                        Using outputWriter
+                            System.Console.SetOut(outputWriter)
+                            System.Console.SetError(outputWriter)
 
                             Dim methodResult As Object = method.Invoke(Nothing, parameters)
 
                             System.Console.SetOut(originalOut)
                             System.Console.SetError(originalError)
+
+                            ' Flush any remaining buffered output
+                            outputWriter.Flush()
 
                             Dim output As String = outputBuilder.ToString()
 

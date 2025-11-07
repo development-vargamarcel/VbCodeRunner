@@ -210,6 +210,71 @@ End Module
         System.Console.WriteLine(result11)
         System.Console.WriteLine()
 
+        System.Console.WriteLine("Example 12: Custom Logger - Write to file")
+        System.Console.WriteLine("------------------------------------------")
+        Dim code12 As String = "
+Public Module TestModule
+    Public Function TestLogging() As String
+        For i As Integer = 1 To 3
+            Console.WriteLine($""Log entry {i}: Processing..."")
+        Next
+        Console.Error.WriteLine(""This is an error message"")
+        Return ""Logging test completed""
+    End Function
+End Module
+"
+        Dim logFilePath As String = "custom_log.txt"
+        Dim customLogAction As System.Action(Of String) = Sub(logMessage As String)
+                                                              System.IO.File.AppendAllText(logFilePath, logMessage)
+                                                          End Sub
+
+        ' Clear the log file if it exists
+        If System.IO.File.Exists(logFilePath) Then
+            System.IO.File.Delete(logFilePath)
+        End If
+
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code12)
+        System.Console.WriteLine($"Using custom logger to write to: {logFilePath}")
+        Dim result12 As String = VBCodeExecutor.ExecuteVBCode(code12, customLogAction)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result12)
+        System.Console.WriteLine()
+
+        If System.IO.File.Exists(logFilePath) Then
+            System.Console.WriteLine("Content written to log file:")
+            System.Console.WriteLine(System.IO.File.ReadAllText(logFilePath))
+        End If
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 13: Default Logger (Console) vs Custom Logger")
+        System.Console.WriteLine("------------------------------------------------------")
+        Dim code13 As String = "
+Public Module TestModule
+    Public Function TestOutput() As String
+        Console.WriteLine(""Standard output message"")
+        Return ""Function result""
+    End Function
+End Module
+"
+        System.Console.WriteLine("13a. Using DEFAULT logging (to console):")
+        Dim result13a As String = VBCodeExecutor.ExecuteVBCode(code13)
+        System.Console.WriteLine(result13a)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("13b. Using CUSTOM logging (to memory):")
+        Dim capturedLogs As New System.Collections.Generic.List(Of String)()
+        Dim customLogger As System.Action(Of String) = Sub(logMessage As String)
+                                                           capturedLogs.Add(logMessage)
+                                                       End Sub
+        Dim result13b As String = VBCodeExecutor.ExecuteVBCode(code13, customLogger)
+        System.Console.WriteLine($"Function returned: {result13b}")
+        System.Console.WriteLine($"Captured {capturedLogs.Count} log messages:")
+        For Each log In capturedLogs
+            System.Console.WriteLine($"  > {log.TrimEnd()}")
+        Next
+        System.Console.WriteLine()
+
         System.Console.WriteLine("=== All examples completed ===")
     End Sub
 End Module
