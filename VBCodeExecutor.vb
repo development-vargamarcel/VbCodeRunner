@@ -19,14 +19,24 @@ Public Module VBCodeExecutor
                 MetadataReference.CreateFromFile(GetType(Console).Assembly.Location),
                 MetadataReference.CreateFromFile(Assembly.Load("System.Runtime").Location),
                 MetadataReference.CreateFromFile(Assembly.Load("System.Console").Location),
-                MetadataReference.CreateFromFile(Assembly.Load("netstandard").Location)
+                MetadataReference.CreateFromFile(Assembly.Load("netstandard").Location),
+                MetadataReference.CreateFromFile(GetType(Microsoft.VisualBasic.CompilerServices.StandardModuleAttribute).Assembly.Location)
             }
+            
+            Dim globalImports = {
+                GlobalImport.Parse("System"),
+                GlobalImport.Parse("System.Collections.Generic"),
+                GlobalImport.Parse("System.Linq")
+            }
+            
+            Dim compilationOptions = New VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary).
+                WithGlobalImports(globalImports)
             
             Dim compilation As VisualBasicCompilation = VisualBasicCompilation.Create(
                 assemblyName,
                 syntaxTrees:={syntaxTree},
                 references:=references,
-                options:=New VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                options:=compilationOptions
             )
             
             Using ms As New MemoryStream()
@@ -89,7 +99,8 @@ Public Module VBCodeExecutor
                     Catch ex As Exception
                         Console.SetOut(originalOut)
                         Console.SetError(originalError)
-                        Return $"Runtime Error: {ex.InnerException?.Message ?? ex.Message}" & vbCrLf & ex.StackTrace
+                        Dim errorMessage As String = If(ex.InnerException IsNot Nothing, ex.InnerException.Message, ex.Message)
+                        Return $"Runtime Error: {errorMessage}" & vbCrLf & ex.StackTrace
                     End Try
                 End If
             End Using
