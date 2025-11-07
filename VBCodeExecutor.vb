@@ -1,4 +1,5 @@
 Imports System
+Imports System.Globalization
 Imports System.IO
 Imports System.Reflection
 Imports System.Text
@@ -8,7 +9,79 @@ Imports Microsoft.CodeAnalysis.Emit
 
 Public Module VBCodeExecutor
 
+    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As Dictionary(Of String, Object)) As String
+        Try
+            Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
+            Return ExecuteVBCodeInternal(modifiedCode, Nothing)
+        Catch ex As Exception
+            Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
+        End Try
+    End Function
+
     Public Function ExecuteVBCode(vbCodeString As String, ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters)
+    End Function
+
+    Private Function InjectVariables(vbCodeString As String, variables As Dictionary(Of String, Object)) As String
+        If variables Is Nothing OrElse variables.Count = 0 Then
+            Return vbCodeString
+        End If
+
+        Dim variableDeclarations As New StringBuilder()
+        variableDeclarations.AppendLine()
+        
+        For Each kvp In variables
+            Dim varName As String = kvp.Key
+            Dim varValue As Object = kvp.Value
+            
+            Dim valueStr As String
+            If varValue Is Nothing Then
+                valueStr = "Nothing"
+            ElseIf TypeOf varValue Is String Then
+                valueStr = $"""{varValue.ToString().Replace("""", """""")}"""
+            ElseIf TypeOf varValue Is Boolean Then
+                valueStr = If(CBool(varValue), "True", "False")
+            ElseIf TypeOf varValue Is Integer Then
+                valueStr = CInt(varValue).ToString(CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Long Then
+                valueStr = CLng(varValue).ToString(CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Short Then
+                valueStr = CShort(varValue).ToString(CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Byte Then
+                valueStr = CByte(varValue).ToString(CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Double Then
+                valueStr = CDbl(varValue).ToString("R", CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Single Then
+                valueStr = CSng(varValue).ToString("R", CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is Decimal Then
+                valueStr = CDec(varValue).ToString(CultureInfo.InvariantCulture) & "D"
+            Else
+                valueStr = $"DirectCast(Nothing, Object)"
+            End If
+            
+            variableDeclarations.AppendLine($"        Dim {varName} As Object = {valueStr}")
+        Next
+        
+        Dim moduleStartIndex As Integer = vbCodeString.IndexOf("Public Module", StringComparison.OrdinalIgnoreCase)
+        If moduleStartIndex = -1 Then
+            moduleStartIndex = vbCodeString.IndexOf("Module", StringComparison.OrdinalIgnoreCase)
+        End If
+        
+        If moduleStartIndex >= 0 Then
+            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(vbLf, moduleStartIndex)
+            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(vbCr, moduleStartIndex)
+            
+            If moduleLineEnd >= 0 Then
+                Return vbCodeString.Substring(0, moduleLineEnd + 1) & 
+                       variableDeclarations.ToString() & 
+                       vbCodeString.Substring(moduleLineEnd + 1)
+            End If
+        End If
+        
+        Return vbCodeString
+    End Function
+
+    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object()) As String
         Try
             Dim syntaxTree As SyntaxTree = VisualBasicSyntaxTree.ParseText(vbCodeString)
             
