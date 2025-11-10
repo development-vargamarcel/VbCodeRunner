@@ -106,6 +106,10 @@ Public Module VBCodeExecutor
                 valueStr = "Nothing"
             ElseIf TypeOf varValue Is String Then
                 valueStr = $"""{varValue.ToString().Replace("""", """""")}"""
+            ElseIf TypeOf varValue Is Char Then
+                Dim charValue As Char = CChar(varValue)
+                ' Use ChrW for proper Unicode character representation
+                valueStr = $"ChrW({Microsoft.VisualBasic.AscW(charValue)})"
             ElseIf TypeOf varValue Is Boolean Then
                 valueStr = If(CBool(varValue), "True", "False")
             ElseIf TypeOf varValue Is Integer Then
@@ -116,16 +120,48 @@ Public Module VBCodeExecutor
                 valueStr = CShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "S"
             ElseIf TypeOf varValue Is Byte Then
                 valueStr = CByte(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ElseIf TypeOf varValue Is SByte Then
+                valueStr = $"CSByte({CSByte(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)})"
+            ElseIf TypeOf varValue Is UShort Then
+                valueStr = $"CUShort({CUShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)})"
+            ElseIf TypeOf varValue Is UInteger Then
+                valueStr = CUInt(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "UI"
+            ElseIf TypeOf varValue Is ULong Then
+                valueStr = CULng(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "UL"
             ElseIf TypeOf varValue Is Double Then
-                valueStr = CDbl(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                Dim dblValue As Double = CDbl(varValue)
+                ' Handle special double values
+                If Double.IsNaN(dblValue) Then
+                    valueStr = "Double.NaN"
+                ElseIf Double.IsPositiveInfinity(dblValue) Then
+                    valueStr = "Double.PositiveInfinity"
+                ElseIf Double.IsNegativeInfinity(dblValue) Then
+                    valueStr = "Double.NegativeInfinity"
+                Else
+                    valueStr = dblValue.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                End If
             ElseIf TypeOf varValue Is Single Then
-                valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture) & "F"
+                Dim sngValue As Single = CSng(varValue)
+                ' Handle special single values
+                If Single.IsNaN(sngValue) Then
+                    valueStr = "Single.NaN"
+                ElseIf Single.IsPositiveInfinity(sngValue) Then
+                    valueStr = "Single.PositiveInfinity"
+                ElseIf Single.IsNegativeInfinity(sngValue) Then
+                    valueStr = "Single.NegativeInfinity"
+                Else
+                    valueStr = sngValue.ToString("R", System.Globalization.CultureInfo.InvariantCulture) & "F"
+                End If
             ElseIf TypeOf varValue Is Decimal Then
                 valueStr = CDec(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "D"
             ElseIf TypeOf varValue Is System.DateTime Then
-                ' DateTime: Store as ticks for precise representation
+                ' DateTime: Store as ticks and DateTimeKind for precise representation
                 Dim dt As System.DateTime = CType(varValue, System.DateTime)
-                valueStr = $"New DateTime({dt.Ticks}L)"
+                valueStr = $"New DateTime({dt.Ticks}L, DateTimeKind.{dt.Kind})"
+            ElseIf TypeOf varValue Is System.DateTimeOffset Then
+                ' DateTimeOffset: Store as ticks and offset
+                Dim dto As System.DateTimeOffset = CType(varValue, System.DateTimeOffset)
+                valueStr = $"New DateTimeOffset({dto.Ticks}L, New TimeSpan({dto.Offset.Ticks}L))"
             ElseIf TypeOf varValue Is System.TimeSpan Then
                 ' TimeSpan: Store as ticks
                 Dim ts As System.TimeSpan = CType(varValue, System.TimeSpan)
@@ -134,12 +170,32 @@ Public Module VBCodeExecutor
                 ' Guid: Store as string and parse
                 Dim g As System.Guid = CType(varValue, System.Guid)
                 valueStr = $"New Guid(""{g.ToString()}"")"
+            ElseIf TypeOf varValue Is System.DBNull Then
+                ' DBNull
+                valueStr = "System.DBNull.Value"
+            ElseIf varValue.GetType().IsEnum Then
+                ' Enum types: Convert to underlying type and cast back
+                Dim enumType As System.Type = varValue.GetType()
+                Dim underlyingValue As Object = System.Convert.ChangeType(varValue, System.Enum.GetUnderlyingType(enumType))
+                Dim enumTypeName As String = enumType.FullName
+                valueStr = $"CType({underlyingValue}, {enumTypeName})"
             Else
-                ' Complex type: Store in object store and retrieve via reference
-                Dim storageKey As String = $"{executionId}_{varName}"
-                _objectStore.TryAdd(storageKey, varValue)
-                valueStr = $"VBCodeExecutor.GetStoredObject(""{storageKey}"")"
-                useDirectAssignment = False
+                ' Check if it's a Nullable type
+                Dim actualType As System.Type = varValue.GetType()
+                If actualType.IsGenericType AndAlso actualType.GetGenericTypeDefinition() Is GetType(System.Nullable(Of )) Then
+                    ' This shouldn't normally happen since Nullable(Of T) with a value would be unwrapped
+                    ' But handle it just in case by storing in object store
+                    Dim storageKey As String = $"{executionId}_{varName}"
+                    _objectStore.TryAdd(storageKey, varValue)
+                    valueStr = $"VBCodeExecutor.GetStoredObject(""{storageKey}"")"
+                    useDirectAssignment = False
+                Else
+                    ' Complex type: Store in object store and retrieve via reference
+                    Dim storageKey As String = $"{executionId}_{varName}"
+                    _objectStore.TryAdd(storageKey, varValue)
+                    valueStr = $"VBCodeExecutor.GetStoredObject(""{storageKey}"")"
+                    useDirectAssignment = False
+                End If
             End If
 
             ' Generate the variable declaration
@@ -198,39 +254,76 @@ Public Module VBCodeExecutor
     Private Function GetVBTypeName(type As System.Type) As String
         If type Is Nothing Then Return "Object"
 
-        ' Handle common types
+        ' Handle signed integer types
         If type Is GetType(System.Int32) Then Return "Integer"
         If type Is GetType(System.Int64) Then Return "Long"
         If type Is GetType(System.Int16) Then Return "Short"
+        If type Is GetType(System.SByte) Then Return "SByte"
+
+        ' Handle unsigned integer types
         If type Is GetType(System.Byte) Then Return "Byte"
+        If type Is GetType(System.UInt16) Then Return "UShort"
+        If type Is GetType(System.UInt32) Then Return "UInteger"
+        If type Is GetType(System.UInt64) Then Return "ULong"
+
+        ' Handle floating point types
         If type Is GetType(System.Double) Then Return "Double"
         If type Is GetType(System.Single) Then Return "Single"
         If type Is GetType(System.Decimal) Then Return "Decimal"
+
+        ' Handle other primitive types
         If type Is GetType(System.Boolean) Then Return "Boolean"
+        If type Is GetType(System.Char) Then Return "Char"
         If type Is GetType(System.String) Then Return "String"
+
+        ' Handle date/time types
         If type Is GetType(System.DateTime) Then Return "DateTime"
+        If type Is GetType(System.DateTimeOffset) Then Return "DateTimeOffset"
         If type Is GetType(System.TimeSpan) Then Return "TimeSpan"
+
+        ' Handle other common types
         If type Is GetType(System.Guid) Then Return "Guid"
+        If type Is GetType(System.DBNull) Then Return "DBNull"
+
+        ' Handle enums
+        If type.IsEnum Then
+            Return type.FullName
+        End If
 
         ' For arrays
         If type.IsArray Then
             Dim elementType As System.Type = type.GetElementType()
-            Return GetVBTypeName(elementType) & "()"
+            Dim rank As Integer = type.GetArrayRank()
+            Dim commas As String = New String(","c, rank - 1)
+            Return GetVBTypeName(elementType) & "(" & commas & ")"
         End If
 
         ' For generic types
         If type.IsGenericType Then
             Dim genericTypeDef As System.Type = type.GetGenericTypeDefinition()
+
+            ' Handle Nullable types
+            If genericTypeDef Is GetType(System.Nullable(Of )) Then
+                Return GetVBTypeName(type.GetGenericArguments()(0)) & "?"
+            End If
+
             If genericTypeDef Is GetType(System.Collections.Generic.List(Of )) Then
                 Return $"List(Of {GetVBTypeName(type.GetGenericArguments()(0))})"
             ElseIf genericTypeDef Is GetType(System.Collections.Generic.Dictionary(Of ,)) Then
                 Dim args As System.Type() = type.GetGenericArguments()
                 Return $"Dictionary(Of {GetVBTypeName(args(0))}, {GetVBTypeName(args(1))})"
+            ElseIf genericTypeDef Is GetType(System.Collections.Generic.IEnumerable(Of )) Then
+                Return $"IEnumerable(Of {GetVBTypeName(type.GetGenericArguments()(0))})"
+            ElseIf genericTypeDef Is GetType(System.Collections.Generic.IList(Of )) Then
+                Return $"IList(Of {GetVBTypeName(type.GetGenericArguments()(0))})"
+            ElseIf genericTypeDef Is GetType(System.Collections.Generic.IDictionary(Of ,)) Then
+                Dim args As System.Type() = type.GetGenericArguments()
+                Return $"IDictionary(Of {GetVBTypeName(args(0))}, {GetVBTypeName(args(1))})"
             End If
         End If
 
-        ' Default: use the type's name
-        Return type.Name
+        ' Default: use the type's full name for better clarity
+        Return If(String.IsNullOrEmpty(type.FullName), type.Name, type.FullName)
     End Function
 
     ''' <summary>
