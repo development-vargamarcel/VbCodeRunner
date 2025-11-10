@@ -1,6 +1,23 @@
 Public Module VBCodeExecutor
 
     ''' <summary>
+    ''' Thread-safe storage for complex objects that cannot be represented as VB literals
+    ''' Key format: "{executionId}_{variableName}"
+    ''' </summary>
+    Private ReadOnly _objectStore As New System.Collections.Concurrent.ConcurrentDictionary(Of String, Object)()
+
+    ''' <summary>
+    ''' Public accessor for dynamically compiled code to retrieve stored objects
+    ''' </summary>
+    Public Function GetStoredObject(key As String) As Object
+        Dim value As Object = Nothing
+        If _objectStore.TryGetValue(key, value) Then
+            Return value
+        End If
+        Return Nothing
+    End Function
+
+    ''' <summary>
     ''' Custom TextWriter that redirects output to an Action callback
     ''' </summary>
     Private Class ActionTextWriter
@@ -41,11 +58,16 @@ Public Module VBCodeExecutor
     End Class
 
     Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
+        Dim executionId As String = System.Guid.NewGuid().ToString("N")
         Try
-            Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
-            Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Dim modifiedCode As String = InjectVariables(vbCodeString, variables, executionId)
+            Dim result As String = ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Return result
         Catch ex As System.Exception
             Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
+        Finally
+            ' Clean up stored objects for this execution
+            CleanupExecution(executionId)
         End Try
     End Function
 
@@ -57,19 +79,21 @@ Public Module VBCodeExecutor
         Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing)
     End Function
 
-    Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object)) As String
+    Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), executionId As String) As String
         If variables Is Nothing OrElse variables.Count = 0 Then
             Return vbCodeString
         End If
 
         Dim variableDeclarations As New System.Text.StringBuilder()
-        variableDeclarations.AppendLine()
 
         For Each kvp As System.Collections.Generic.KeyValuePair(Of String, Object) In variables
             Dim varName As String = kvp.Key
             Dim varValue As Object = kvp.Value
 
-            Dim valueStr As String
+            Dim valueStr As String = Nothing
+            Dim useDirectAssignment As Boolean = True
+
+            ' Check if this is a primitive type that can be represented as a literal
             If varValue Is Nothing Then
                 valueStr = "Nothing"
             ElseIf TypeOf varValue Is String Then
@@ -79,42 +103,147 @@ Public Module VBCodeExecutor
             ElseIf TypeOf varValue Is Integer Then
                 valueStr = CInt(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Long Then
-                valueStr = CLng(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CLng(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "L"
             ElseIf TypeOf varValue Is Short Then
-                valueStr = CShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "S"
             ElseIf TypeOf varValue Is Byte Then
                 valueStr = CByte(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Double Then
                 valueStr = CDbl(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Single Then
-                valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture) & "F"
             ElseIf TypeOf varValue Is Decimal Then
                 valueStr = CDec(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "D"
+            ElseIf TypeOf varValue Is System.DateTime Then
+                ' DateTime: Store as ticks for precise representation
+                Dim dt As System.DateTime = CType(varValue, System.DateTime)
+                valueStr = $"New DateTime({dt.Ticks}L)"
+            ElseIf TypeOf varValue Is System.TimeSpan Then
+                ' TimeSpan: Store as ticks
+                Dim ts As System.TimeSpan = CType(varValue, System.TimeSpan)
+                valueStr = $"New TimeSpan({ts.Ticks}L)"
+            ElseIf TypeOf varValue Is System.Guid Then
+                ' Guid: Store as string and parse
+                Dim g As System.Guid = CType(varValue, System.Guid)
+                valueStr = $"New Guid(""{g.ToString()}"")"
             Else
-                valueStr = $"DirectCast(Nothing, Object)"
+                ' Complex type: Store in object store and retrieve via reference
+                Dim storageKey As String = $"{executionId}_{varName}"
+                _objectStore.TryAdd(storageKey, varValue)
+                valueStr = $"VBCodeExecutor.GetStoredObject(""{storageKey}"")"
+                useDirectAssignment = False
             End If
 
-            variableDeclarations.AppendLine($"        Dim {varName} As Object = {valueStr}")
+            ' Generate the variable declaration
+            If useDirectAssignment Then
+                variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
+            Else
+                ' For complex types, we need to cast appropriately
+                Dim actualType As System.Type = varValue.GetType()
+                Dim typeName As String = GetVBTypeName(actualType)
+                variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
+            End If
         Next
 
-        Dim moduleStartIndex As Integer = vbCodeString.IndexOf("Public Module", System.StringComparison.OrdinalIgnoreCase)
-        If moduleStartIndex = -1 Then
-            moduleStartIndex = vbCodeString.IndexOf("Module", System.StringComparison.OrdinalIgnoreCase)
-        End If
+        ' Try to find the module declaration with various patterns
+        Dim modulePattern As String = "Module\s+\w+"
+        Dim match As System.Text.RegularExpressions.Match = System.Text.RegularExpressions.Regex.Match(vbCodeString, modulePattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase)
 
-        If moduleStartIndex >= 0 Then
-            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, moduleStartIndex)
-            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, moduleStartIndex)
+        If match.Success Then
+            ' Find the end of the line where the module is declared
+            ' Handle different line ending types: CRLF (\r\n), LF (\n), or CR (\r)
+            Dim moduleEndIndex As Integer = match.Index + match.Length
+            Dim searchStartIndex As Integer = moduleEndIndex
 
-            If moduleLineEnd >= 0 Then
-                Return vbCodeString.Substring(0, moduleLineEnd + 1) &
-                       variableDeclarations.ToString() &
-                       vbCodeString.Substring(moduleLineEnd + 1)
+            ' Find the next line ending
+            Dim crlfIndex As Integer = vbCodeString.IndexOf(System.Environment.NewLine, searchStartIndex)
+            Dim lfIndex As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, searchStartIndex)
+            Dim crIndex As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, searchStartIndex)
+
+            ' Choose the earliest line ending found
+            Dim lineEndIndex As Integer = -1
+
+            If crlfIndex >= 0 Then lineEndIndex = crlfIndex + System.Environment.NewLine.Length
+            If lfIndex >= 0 AndAlso (lineEndIndex = -1 OrElse lfIndex < lineEndIndex) Then
+                lineEndIndex = lfIndex + 1
+            ElseIf crIndex >= 0 AndAlso (lineEndIndex = -1 OrElse crIndex < lineEndIndex) Then
+                lineEndIndex = crIndex + 1
+            End If
+
+            If lineEndIndex > 0 Then
+                ' Inject the variable declarations after the module line
+                Dim result As String = vbCodeString.Substring(0, lineEndIndex) &
+                                      variableDeclarations.ToString() &
+                                      vbCodeString.Substring(lineEndIndex)
+                Return result
             End If
         End If
 
-        Return vbCodeString
+        ' Fallback: If we couldn't find a module declaration, try to inject at the beginning
+        ' This shouldn't normally happen, but provides a safety net
+        Return variableDeclarations.ToString() & System.Environment.NewLine & vbCodeString
     End Function
+
+    ''' <summary>
+    ''' Helper function to get VB-friendly type names for better type hints
+    ''' </summary>
+    Private Function GetVBTypeName(type As System.Type) As String
+        If type Is Nothing Then Return "Object"
+
+        ' Handle common types
+        If type Is GetType(System.Int32) Then Return "Integer"
+        If type Is GetType(System.Int64) Then Return "Long"
+        If type Is GetType(System.Int16) Then Return "Short"
+        If type Is GetType(System.Byte) Then Return "Byte"
+        If type Is GetType(System.Double) Then Return "Double"
+        If type Is GetType(System.Single) Then Return "Single"
+        If type Is GetType(System.Decimal) Then Return "Decimal"
+        If type Is GetType(System.Boolean) Then Return "Boolean"
+        If type Is GetType(System.String) Then Return "String"
+        If type Is GetType(System.DateTime) Then Return "DateTime"
+        If type Is GetType(System.TimeSpan) Then Return "TimeSpan"
+        If type Is GetType(System.Guid) Then Return "Guid"
+
+        ' For arrays
+        If type.IsArray Then
+            Dim elementType As System.Type = type.GetElementType()
+            Return GetVBTypeName(elementType) & "()"
+        End If
+
+        ' For generic types
+        If type.IsGenericType Then
+            Dim genericTypeDef As System.Type = type.GetGenericTypeDefinition()
+            If genericTypeDef Is GetType(System.Collections.Generic.List(Of )) Then
+                Return $"List(Of {GetVBTypeName(type.GetGenericArguments()(0))})"
+            ElseIf genericTypeDef Is GetType(System.Collections.Generic.Dictionary(Of ,)) Then
+                Dim args As System.Type() = type.GetGenericArguments()
+                Return $"Dictionary(Of {GetVBTypeName(args(0))}, {GetVBTypeName(args(1))})"
+            End If
+        End If
+
+        ' Default: use the type's name
+        Return type.Name
+    End Function
+
+    ''' <summary>
+    ''' Clean up stored objects for a specific execution
+    ''' </summary>
+    Private Sub CleanupExecution(executionId As String)
+        Dim keysToRemove As New System.Collections.Generic.List(Of String)()
+
+        ' Find all keys for this execution
+        For Each key As String In _objectStore.Keys
+            If key.StartsWith(executionId & "_") Then
+                keysToRemove.Add(key)
+            End If
+        Next
+
+        ' Remove them
+        For Each key As String In keysToRemove
+            Dim removedValue As Object = Nothing
+            _objectStore.TryRemove(key, removedValue)
+        Next
+    End Sub
 
     Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
         Try
