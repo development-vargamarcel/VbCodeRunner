@@ -15,7 +15,7 @@ Public Module VBCodeExecutor
 
         Public Overrides Sub Write(value As Char)
             _buffer.Append(value)
-            If value = ControlChars.Lf Then
+            If value = Microsoft.VisualBasic.ControlChars.Lf Then
                 Flush()
             End If
         End Sub
@@ -45,7 +45,7 @@ Public Module VBCodeExecutor
             Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
             Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
         Catch ex As System.Exception
-            Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
+            Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
         End Try
     End Function
 
@@ -65,7 +65,7 @@ Public Module VBCodeExecutor
         Dim variableDeclarations As New System.Text.StringBuilder()
         variableDeclarations.AppendLine()
 
-        For Each kvp In variables
+        For Each kvp As System.Collections.Generic.KeyValuePair(Of String, Object) In variables
             Dim varName As String = kvp.Key
             Dim varValue As Object = kvp.Value
 
@@ -103,8 +103,8 @@ Public Module VBCodeExecutor
         End If
 
         If moduleStartIndex >= 0 Then
-            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(vbLf, moduleStartIndex)
-            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(vbCr, moduleStartIndex)
+            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, moduleStartIndex)
+            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, moduleStartIndex)
 
             If moduleLineEnd >= 0 Then
                 Return vbCodeString.Substring(0, moduleLineEnd + 1) &
@@ -149,11 +149,11 @@ Public Module VBCodeExecutor
                 Dim result As Microsoft.CodeAnalysis.Emit.EmitResult = compilation.Emit(ms)
 
                 If Not result.Success Then
-                    Dim failures = result.Diagnostics.Where(Function(diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                    Dim failures As System.Collections.Generic.IEnumerable(Of Microsoft.CodeAnalysis.Diagnostic) = System.Linq.Enumerable.Where(Of Microsoft.CodeAnalysis.Diagnostic)(result.Diagnostics, Function(diagnostic As Microsoft.CodeAnalysis.Diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
 
                     Dim errorBuilder As New System.Text.StringBuilder()
                     errorBuilder.AppendLine("Compilation Errors:")
-                    For Each diagnostic In failures
+                    For Each diagnostic As Microsoft.CodeAnalysis.Diagnostic In failures
                         errorBuilder.AppendLine($"  {diagnostic.Id}: {diagnostic.GetMessage()}")
                     Next
 
@@ -162,23 +162,23 @@ Public Module VBCodeExecutor
                     ms.Seek(0, System.IO.SeekOrigin.Begin)
                     Dim assembly As System.Reflection.Assembly = System.Reflection.Assembly.Load(ms.ToArray())
 
-                    Dim type = assembly.GetTypes().FirstOrDefault()
+                    Dim type As System.Type = System.Linq.Enumerable.FirstOrDefault(Of System.Type)(assembly.GetTypes())
                     If type Is Nothing Then
                         Return "Error: No types found in compiled assembly. Make sure your code includes a Module or Class."
                     End If
 
-                    Dim methods = type.GetMethods(System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Static)
+                    Dim methods As System.Reflection.MethodInfo() = type.GetMethods(System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Static)
                     Dim method As System.Reflection.MethodInfo = Nothing
 
                     If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
-                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = parameters.Length)
+                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = parameters.Length)
                         If method Is Nothing Then
                             Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
                         End If
                     Else
-                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = 0)
+                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = 0)
                         If method Is Nothing Then
-                            method = methods.FirstOrDefault()
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods)
                             If method Is Nothing Then
                                 Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
                             End If
@@ -231,13 +231,13 @@ Public Module VBCodeExecutor
                         System.Console.SetOut(originalOut)
                         System.Console.SetError(originalError)
                         Dim errorMessage As String = If(ex.InnerException IsNot Nothing, ex.InnerException.Message, ex.Message)
-                        Return $"Runtime Error: {errorMessage}" & vbCrLf & ex.StackTrace
+                        Return $"Runtime Error: {errorMessage}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
                     End Try
                 End If
             End Using
 
         Catch ex As System.Exception
-            Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
+            Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
         End Try
     End Function
 
