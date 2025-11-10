@@ -149,7 +149,7 @@ Public Module VBCodeExecutor
                 Dim result As Microsoft.CodeAnalysis.Emit.EmitResult = compilation.Emit(ms)
 
                 If Not result.Success Then
-                    Dim failures = result.Diagnostics.Where(Function(diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                    Dim failures = System.Linq.Enumerable.Where(result.Diagnostics, Function(diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
 
                     Dim errorBuilder As New System.Text.StringBuilder()
                     errorBuilder.AppendLine("Compilation Errors:")
@@ -162,7 +162,7 @@ Public Module VBCodeExecutor
                     ms.Seek(0, System.IO.SeekOrigin.Begin)
                     Dim assembly As System.Reflection.Assembly = System.Reflection.Assembly.Load(ms.ToArray())
 
-                    Dim type = assembly.GetTypes().FirstOrDefault()
+                    Dim type = System.Linq.Enumerable.FirstOrDefault(assembly.GetTypes())
                     If type Is Nothing Then
                         Return "Error: No types found in compiled assembly. Make sure your code includes a Module or Class."
                     End If
@@ -171,14 +171,14 @@ Public Module VBCodeExecutor
                     Dim method As System.Reflection.MethodInfo = Nothing
 
                     If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
-                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = parameters.Length)
+                        method = System.Linq.Enumerable.FirstOrDefault(methods, Function(m) m.GetParameters().Length = parameters.Length)
                         If method Is Nothing Then
                             Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
                         End If
                     Else
-                        method = methods.FirstOrDefault(Function(m) m.GetParameters().Length = 0)
+                        method = System.Linq.Enumerable.FirstOrDefault(methods, Function(m) m.GetParameters().Length = 0)
                         If method Is Nothing Then
-                            method = methods.FirstOrDefault()
+                            method = System.Linq.Enumerable.FirstOrDefault(methods)
                             If method Is Nothing Then
                                 Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
                             End If
