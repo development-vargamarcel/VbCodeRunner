@@ -57,11 +57,11 @@ Public Module VBCodeExecutor
         End Property
     End Class
 
-    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
+    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional entryPointName As String = Nothing, Optional customLogger As System.Action(Of String) = Nothing) As String
         Dim executionId As String = System.Guid.NewGuid().ToString("N")
         Try
             Dim modifiedCode As String = InjectVariables(vbCodeString, variables, executionId)
-            Dim result As String = ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Dim result As String = ExecuteVBCodeInternal(modifiedCode, Nothing, entryPointName, customLogger)
             Return result
         Catch ex As System.Exception
             Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
@@ -72,11 +72,19 @@ Public Module VBCodeExecutor
     End Function
 
     Public Function ExecuteVBCode(vbCodeString As String, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
-        Return ExecuteVBCodeInternal(vbCodeString, parameters, customLogger)
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing, customLogger)
     End Function
 
     Public Function ExecuteVBCode(vbCodeString As String, ParamArray parameters As Object()) As String
-        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing)
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing, Nothing)
+    End Function
+
+    Public Function ExecuteVBCode(vbCodeString As String, entryPointName As String, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, entryPointName, customLogger)
+    End Function
+
+    Public Function ExecuteVBCode(vbCodeString As String, entryPointName As String, ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, entryPointName, Nothing)
     End Function
 
     Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), executionId As String) As String
@@ -245,7 +253,7 @@ Public Module VBCodeExecutor
         Next
     End Sub
 
-    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
+    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), entryPointName As String, customLogger As System.Action(Of String)) As String
         Try
             Dim syntaxTree As Microsoft.CodeAnalysis.SyntaxTree = Microsoft.CodeAnalysis.VisualBasic.VisualBasicSyntaxTree.ParseText(vbCodeString)
 
@@ -300,17 +308,39 @@ Public Module VBCodeExecutor
                     Dim methods As System.Reflection.MethodInfo() = type.GetMethods(System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Static)
                     Dim method As System.Reflection.MethodInfo = Nothing
 
-                    If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
-                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = parameters.Length)
-                        If method Is Nothing Then
-                            Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
+                    ' If entry point name is specified, filter by name first
+                    If Not String.IsNullOrEmpty(entryPointName) Then
+                        If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.Name = entryPointName AndAlso m.GetParameters().Length = parameters.Length)
+                            If method Is Nothing Then
+                                Return $"Error: No public shared method named '{entryPointName}' found with {parameters.Length} parameter(s). Make sure your code includes a method named '{entryPointName}' that accepts {parameters.Length} parameter(s)."
+                            End If
+                        Else
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.Name = entryPointName AndAlso m.GetParameters().Length = 0)
+                            If method Is Nothing Then
+                                ' Try to find the method with any parameter count
+                                method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.Name = entryPointName)
+                                If method Is Nothing Then
+                                    Return $"Error: No public shared method named '{entryPointName}' found. Make sure your code includes a method named '{entryPointName}'."
+                                Else
+                                    Return $"Error: Method '{entryPointName}' was found but it requires {method.GetParameters().Length} parameter(s). Please provide the required parameters."
+                                End If
+                            End If
                         End If
                     Else
-                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = 0)
-                        If method Is Nothing Then
-                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods)
+                        ' No entry point specified, use original logic
+                        If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = parameters.Length)
                             If method Is Nothing Then
-                                Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
+                                Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
+                            End If
+                        Else
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = 0)
+                            If method Is Nothing Then
+                                method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods)
+                                If method Is Nothing Then
+                                    Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
+                                End If
                             End If
                         End If
                     End If
