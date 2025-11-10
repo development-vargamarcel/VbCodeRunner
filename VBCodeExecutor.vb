@@ -1,6 +1,23 @@
 Public Module VBCodeExecutor
 
     ''' <summary>
+    ''' Thread-safe storage for complex objects that cannot be represented as VB literals
+    ''' Key format: "{executionId}_{variableName}"
+    ''' </summary>
+    Private ReadOnly _objectStore As New System.Collections.Concurrent.ConcurrentDictionary(Of String, Object)()
+
+    ''' <summary>
+    ''' Public accessor for dynamically compiled code to retrieve stored objects
+    ''' </summary>
+    Public Function GetStoredObject(key As String) As Object
+        Dim value As Object = Nothing
+        If _objectStore.TryGetValue(key, value) Then
+            Return value
+        End If
+        Return Nothing
+    End Function
+
+    ''' <summary>
     ''' Custom TextWriter that redirects output to an Action callback
     ''' </summary>
     Private Class ActionTextWriter
@@ -41,11 +58,16 @@ Public Module VBCodeExecutor
     End Class
 
     Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
+        Dim executionId As String = System.Guid.NewGuid().ToString("N")
         Try
-            Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
-            Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Dim modifiedCode As String = InjectVariables(vbCodeString, variables, executionId)
+            Dim result As String = ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Return result
         Catch ex As System.Exception
             Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
+        Finally
+            ' Clean up stored objects for this execution
+            CleanupExecution(executionId)
         End Try
     End Function
 
@@ -57,7 +79,7 @@ Public Module VBCodeExecutor
         Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing)
     End Function
 
-    Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object)) As String
+    Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), executionId As String) As String
         If variables Is Nothing OrElse variables.Count = 0 Then
             Return vbCodeString
         End If
@@ -68,7 +90,10 @@ Public Module VBCodeExecutor
             Dim varName As String = kvp.Key
             Dim varValue As Object = kvp.Value
 
-            Dim valueStr As String
+            Dim valueStr As String = Nothing
+            Dim useDirectAssignment As Boolean = True
+
+            ' Check if this is a primitive type that can be represented as a literal
             If varValue Is Nothing Then
                 valueStr = "Nothing"
             ElseIf TypeOf varValue Is String Then
@@ -89,12 +114,35 @@ Public Module VBCodeExecutor
                 valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture) & "F"
             ElseIf TypeOf varValue Is Decimal Then
                 valueStr = CDec(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "D"
+            ElseIf TypeOf varValue Is System.DateTime Then
+                ' DateTime: Store as ticks for precise representation
+                Dim dt As System.DateTime = CType(varValue, System.DateTime)
+                valueStr = $"New DateTime({dt.Ticks}L)"
+            ElseIf TypeOf varValue Is System.TimeSpan Then
+                ' TimeSpan: Store as ticks
+                Dim ts As System.TimeSpan = CType(varValue, System.TimeSpan)
+                valueStr = $"New TimeSpan({ts.Ticks}L)"
+            ElseIf TypeOf varValue Is System.Guid Then
+                ' Guid: Store as string and parse
+                Dim g As System.Guid = CType(varValue, System.Guid)
+                valueStr = $"New Guid(""{g.ToString()}"")"
             Else
-                valueStr = $"DirectCast(Nothing, Object)"
+                ' Complex type: Store in object store and retrieve via reference
+                Dim storageKey As String = $"{executionId}_{varName}"
+                _objectStore.TryAdd(storageKey, varValue)
+                valueStr = $"VBCodeExecutor.GetStoredObject(""{storageKey}"")"
+                useDirectAssignment = False
             End If
 
-            ' Use Private instead of Dim for module-level variables
-            variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
+            ' Generate the variable declaration
+            If useDirectAssignment Then
+                variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
+            Else
+                ' For complex types, we need to cast appropriately
+                Dim actualType As System.Type = varValue.GetType()
+                Dim typeName As String = GetVBTypeName(actualType)
+                variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
+            End If
         Next
 
         ' Try to find the module declaration with various patterns
@@ -135,6 +183,67 @@ Public Module VBCodeExecutor
         ' This shouldn't normally happen, but provides a safety net
         Return variableDeclarations.ToString() & System.Environment.NewLine & vbCodeString
     End Function
+
+    ''' <summary>
+    ''' Helper function to get VB-friendly type names for better type hints
+    ''' </summary>
+    Private Function GetVBTypeName(type As System.Type) As String
+        If type Is Nothing Then Return "Object"
+
+        ' Handle common types
+        If type Is GetType(System.Int32) Then Return "Integer"
+        If type Is GetType(System.Int64) Then Return "Long"
+        If type Is GetType(System.Int16) Then Return "Short"
+        If type Is GetType(System.Byte) Then Return "Byte"
+        If type Is GetType(System.Double) Then Return "Double"
+        If type Is GetType(System.Single) Then Return "Single"
+        If type Is GetType(System.Decimal) Then Return "Decimal"
+        If type Is GetType(System.Boolean) Then Return "Boolean"
+        If type Is GetType(System.String) Then Return "String"
+        If type Is GetType(System.DateTime) Then Return "DateTime"
+        If type Is GetType(System.TimeSpan) Then Return "TimeSpan"
+        If type Is GetType(System.Guid) Then Return "Guid"
+
+        ' For arrays
+        If type.IsArray Then
+            Dim elementType As System.Type = type.GetElementType()
+            Return GetVBTypeName(elementType) & "()"
+        End If
+
+        ' For generic types
+        If type.IsGenericType Then
+            Dim genericTypeDef As System.Type = type.GetGenericTypeDefinition()
+            If genericTypeDef Is GetType(System.Collections.Generic.List(Of )) Then
+                Return $"List(Of {GetVBTypeName(type.GetGenericArguments()(0))})"
+            ElseIf genericTypeDef Is GetType(System.Collections.Generic.Dictionary(Of ,)) Then
+                Dim args As System.Type() = type.GetGenericArguments()
+                Return $"Dictionary(Of {GetVBTypeName(args(0))}, {GetVBTypeName(args(1))})"
+            End If
+        End If
+
+        ' Default: use the type's name
+        Return type.Name
+    End Function
+
+    ''' <summary>
+    ''' Clean up stored objects for a specific execution
+    ''' </summary>
+    Private Sub CleanupExecution(executionId As String)
+        Dim keysToRemove As New System.Collections.Generic.List(Of String)()
+
+        ' Find all keys for this execution
+        For Each key As String In _objectStore.Keys
+            If key.StartsWith(executionId & "_") Then
+                keysToRemove.Add(key)
+            End If
+        Next
+
+        ' Remove them
+        For Each key As String In keysToRemove
+            Dim removedValue As Object = Nothing
+            _objectStore.TryRemove(key, removedValue)
+        Next
+    End Sub
 
     Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
         Try
