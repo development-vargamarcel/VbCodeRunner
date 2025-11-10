@@ -149,7 +149,7 @@ Public Module VBCodeExecutor
                 Dim result As Microsoft.CodeAnalysis.Emit.EmitResult = compilation.Emit(ms)
 
                 If Not result.Success Then
-                    Dim failures = System.Linq.Enumerable.Where(result.Diagnostics, Function(diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                    Dim failures As System.Collections.Generic.IEnumerable(Of Microsoft.CodeAnalysis.Diagnostic) = System.Linq.Enumerable.Where(Of Microsoft.CodeAnalysis.Diagnostic)(result.Diagnostics, Function(diagnostic As Microsoft.CodeAnalysis.Diagnostic) diagnostic.IsWarningAsError OrElse diagnostic.Severity = Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
 
                     Dim errorBuilder As New System.Text.StringBuilder()
                     errorBuilder.AppendLine("Compilation Errors:")
@@ -162,23 +162,23 @@ Public Module VBCodeExecutor
                     ms.Seek(0, System.IO.SeekOrigin.Begin)
                     Dim assembly As System.Reflection.Assembly = System.Reflection.Assembly.Load(ms.ToArray())
 
-                    Dim type = System.Linq.Enumerable.FirstOrDefault(assembly.GetTypes())
+                    Dim type As System.Type = System.Linq.Enumerable.FirstOrDefault(Of System.Type)(assembly.GetTypes())
                     If type Is Nothing Then
                         Return "Error: No types found in compiled assembly. Make sure your code includes a Module or Class."
                     End If
 
-                    Dim methods = type.GetMethods(System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Static)
+                    Dim methods As System.Reflection.MethodInfo() = type.GetMethods(System.Reflection.BindingFlags.Public Or System.Reflection.BindingFlags.Static)
                     Dim method As System.Reflection.MethodInfo = Nothing
 
                     If parameters IsNot Nothing AndAlso parameters.Length > 0 Then
-                        method = System.Linq.Enumerable.FirstOrDefault(methods, Function(m) m.GetParameters().Length = parameters.Length)
+                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = parameters.Length)
                         If method Is Nothing Then
                             Return $"Error: No public shared method found with {parameters.Length} parameter(s). Make sure your code includes a method that accepts {parameters.Length} parameter(s)."
                         End If
                     Else
-                        method = System.Linq.Enumerable.FirstOrDefault(methods, Function(m) m.GetParameters().Length = 0)
+                        method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods, Function(m As System.Reflection.MethodInfo) m.GetParameters().Length = 0)
                         If method Is Nothing Then
-                            method = System.Linq.Enumerable.FirstOrDefault(methods)
+                            method = System.Linq.Enumerable.FirstOrDefault(Of System.Reflection.MethodInfo)(methods)
                             If method Is Nothing Then
                                 Return "Error: No public shared methods found. Make sure your code includes a public shared function or sub."
                             End If
