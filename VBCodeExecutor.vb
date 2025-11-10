@@ -63,7 +63,6 @@ Public Module VBCodeExecutor
         End If
 
         Dim variableDeclarations As New System.Text.StringBuilder()
-        variableDeclarations.AppendLine()
 
         For Each kvp As System.Collections.Generic.KeyValuePair(Of String, Object) In variables
             Dim varName As String = kvp.Key
@@ -79,41 +78,62 @@ Public Module VBCodeExecutor
             ElseIf TypeOf varValue Is Integer Then
                 valueStr = CInt(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Long Then
-                valueStr = CLng(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CLng(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "L"
             ElseIf TypeOf varValue Is Short Then
-                valueStr = CShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CShort(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "S"
             ElseIf TypeOf varValue Is Byte Then
                 valueStr = CByte(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Double Then
                 valueStr = CDbl(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
             ElseIf TypeOf varValue Is Single Then
-                valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                valueStr = CSng(varValue).ToString("R", System.Globalization.CultureInfo.InvariantCulture) & "F"
             ElseIf TypeOf varValue Is Decimal Then
                 valueStr = CDec(varValue).ToString(System.Globalization.CultureInfo.InvariantCulture) & "D"
             Else
                 valueStr = $"DirectCast(Nothing, Object)"
             End If
 
-            variableDeclarations.AppendLine($"        Dim {varName} As Object = {valueStr}")
+            ' Use Private instead of Dim for module-level variables
+            variableDeclarations.AppendLine($"    Private {varName} As Object = {valueStr}")
         Next
 
-        Dim moduleStartIndex As Integer = vbCodeString.IndexOf("Public Module", System.StringComparison.OrdinalIgnoreCase)
-        If moduleStartIndex = -1 Then
-            moduleStartIndex = vbCodeString.IndexOf("Module", System.StringComparison.OrdinalIgnoreCase)
-        End If
+        ' Try to find the module declaration with various patterns
+        Dim modulePattern As String = "Module\s+\w+"
+        Dim match As System.Text.RegularExpressions.Match = System.Text.RegularExpressions.Regex.Match(vbCodeString, modulePattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase)
 
-        If moduleStartIndex >= 0 Then
-            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, moduleStartIndex)
-            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, moduleStartIndex)
+        If match.Success Then
+            ' Find the end of the line where the module is declared
+            ' Handle different line ending types: CRLF (\r\n), LF (\n), or CR (\r)
+            Dim moduleEndIndex As Integer = match.Index + match.Length
+            Dim searchStartIndex As Integer = moduleEndIndex
 
-            If moduleLineEnd >= 0 Then
-                Return vbCodeString.Substring(0, moduleLineEnd + 1) &
-                       variableDeclarations.ToString() &
-                       vbCodeString.Substring(moduleLineEnd + 1)
+            ' Find the next line ending
+            Dim crlfIndex As Integer = vbCodeString.IndexOf(System.Environment.NewLine, searchStartIndex)
+            Dim lfIndex As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, searchStartIndex)
+            Dim crIndex As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, searchStartIndex)
+
+            ' Choose the earliest line ending found
+            Dim lineEndIndex As Integer = -1
+
+            If crlfIndex >= 0 Then lineEndIndex = crlfIndex + System.Environment.NewLine.Length
+            If lfIndex >= 0 AndAlso (lineEndIndex = -1 OrElse lfIndex < lineEndIndex) Then
+                lineEndIndex = lfIndex + 1
+            ElseIf crIndex >= 0 AndAlso (lineEndIndex = -1 OrElse crIndex < lineEndIndex) Then
+                lineEndIndex = crIndex + 1
+            End If
+
+            If lineEndIndex > 0 Then
+                ' Inject the variable declarations after the module line
+                Dim result As String = vbCodeString.Substring(0, lineEndIndex) &
+                                      variableDeclarations.ToString() &
+                                      vbCodeString.Substring(lineEndIndex)
+                Return result
             End If
         End If
 
-        Return vbCodeString
+        ' Fallback: If we couldn't find a module declaration, try to inject at the beginning
+        ' This shouldn't normally happen, but provides a safety net
+        Return variableDeclarations.ToString() & System.Environment.NewLine & vbCodeString
     End Function
 
     Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
