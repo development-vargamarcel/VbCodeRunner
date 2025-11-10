@@ -41,20 +41,38 @@ Public Module VBCodeExecutor
     End Class
 
     Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
+        Return ExecuteVBCodeWithVariables(vbCodeString, variables, Nothing, customLogger)
+    End Function
+
+    Public Function ExecuteVBCodeWithVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), analysisOptions As CodeAnalysisOptions, Optional customLogger As System.Action(Of String) = Nothing) As String
         Try
             Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
-            Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
+            Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger, analysisOptions)
         Catch ex As System.Exception
             Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
         End Try
     End Function
 
     Public Function ExecuteVBCode(vbCodeString As String, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
-        Return ExecuteVBCodeInternal(vbCodeString, parameters, customLogger)
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, customLogger, Nothing)
     End Function
 
     Public Function ExecuteVBCode(vbCodeString As String, ParamArray parameters As Object()) As String
-        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing)
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing, Nothing)
+    End Function
+
+    ''' <summary>
+    ''' Execute VB code with optional code analysis before execution
+    ''' </summary>
+    Public Function ExecuteVBCode(vbCodeString As String, analysisOptions As CodeAnalysisOptions, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, customLogger, analysisOptions)
+    End Function
+
+    ''' <summary>
+    ''' Execute VB code with optional code analysis before execution
+    ''' </summary>
+    Public Function ExecuteVBCode(vbCodeString As String, analysisOptions As CodeAnalysisOptions, ParamArray parameters As Object()) As String
+        Return ExecuteVBCodeInternal(vbCodeString, parameters, Nothing, analysisOptions)
     End Function
 
     Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object)) As String
@@ -116,7 +134,37 @@ Public Module VBCodeExecutor
         Return vbCodeString
     End Function
 
-    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
+    Private Function ExecuteVBCodeInternal(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String), analysisOptions As CodeAnalysisOptions) As String
+        Try
+            ' Perform code analysis if enabled
+            If analysisOptions IsNot Nothing AndAlso analysisOptions.Enabled Then
+                Dim analysisResult As CodeAnalyzer.AnalysisResult = CodeAnalyzer.AnalyzeCode(vbCodeString, analysisOptions)
+
+                ' If analysis found issues and they prevent execution, return the report
+                If Not analysisResult.Success Then
+                    Return analysisResult.GetFormattedReport() & Microsoft.VisualBasic.ControlChars.CrLf & "Execution aborted due to analysis errors."
+                End If
+
+                ' If analysis succeeded but found warnings/info, prepend them to the output
+                If analysisResult.HasIssues() Then
+                    Dim report As String = analysisResult.GetFormattedReport()
+                    ' Store the report to prepend to final output
+                    Dim analysisReport As String = report & Microsoft.VisualBasic.ControlChars.CrLf & "Proceeding with execution..." & Microsoft.VisualBasic.ControlChars.CrLf & Microsoft.VisualBasic.ControlChars.CrLf
+
+                    ' Execute the code and prepend the analysis report
+                    Dim executionResult As String = ExecuteVBCodeInternalCore(vbCodeString, parameters, customLogger)
+                    Return analysisReport & executionResult
+                End If
+            End If
+
+            ' No analysis or no issues found, proceed with normal execution
+            Return ExecuteVBCodeInternalCore(vbCodeString, parameters, customLogger)
+        Catch ex As System.Exception
+            Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
+        End Try
+    End Function
+
+    Private Function ExecuteVBCodeInternalCore(vbCodeString As String, parameters As Object(), customLogger As System.Action(Of String)) As String
         Try
             Dim syntaxTree As Microsoft.CodeAnalysis.SyntaxTree = Microsoft.CodeAnalysis.VisualBasic.VisualBasicSyntaxTree.ParseText(vbCodeString)
 

@@ -275,6 +275,137 @@ End Module
         Next
         System.Console.WriteLine()
 
-        System.Console.WriteLine("=== All examples completed ===")
+        System.Console.WriteLine("Example 14: Code Analysis DISABLED (default behavior)")
+        System.Console.WriteLine("-----------------------------------------------------")
+        Dim code14 As String = "
+Public Module TestModule
+    Public Function Calculate() As Integer
+        Return 100 + 50
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code14)
+        System.Console.WriteLine("Analysis: DISABLED (default)")
+        Dim result14 As String = VBCodeExecutor.ExecuteVBCode(code14)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result14)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 15: Code Analysis ENABLED - Basic analysis")
+        System.Console.WriteLine("---------------------------------------------------")
+        Dim code15 As String = "
+Public Module TestModule
+    Public Function ProcessData() As String
+        Dim items As Integer() = {1, 2, 3, 4, 5}
+        Dim sum As Integer = 0
+        For Each item In items
+            sum += item
+        Next
+        Console.WriteLine($""Sum of items: {sum}"")
+        Return $""Total: {sum}""
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code15)
+        System.Console.WriteLine("Analysis: ENABLED (basic)")
+        Dim analysisBasic As CodeAnalysisOptions = CodeAnalysisOptions.CreateBasic()
+        Dim result15 As String = VBCodeExecutor.ExecuteVBCode(code15, analysisBasic)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result15)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 16: Code Analysis - Comprehensive (with complexity)")
+        System.Console.WriteLine("------------------------------------------------------------")
+        Dim code16 As String = "
+Public Module TestModule
+    Public Function ComplexCalculation(n As Integer) As Integer
+        Dim result As Integer = 0
+        For i As Integer = 1 To n
+            If i Mod 2 = 0 Then
+                result += i
+            Else
+                result -= i
+            End If
+        Next
+        Console.WriteLine($""Result for n={n}: {result}"")
+        Return result
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code16)
+        System.Console.WriteLine("Analysis: COMPREHENSIVE (syntax + semantics + complexity)")
+        Dim analysisComprehensive As CodeAnalysisOptions = CodeAnalysisOptions.CreateComprehensive()
+        Dim result16 As String = VBCodeExecutor.ExecuteVBCode(code16, analysisComprehensive, 10)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result16)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 17: Code Analysis - Security checks detect file operations")
+        System.Console.WriteLine("-------------------------------------------------------------------")
+        Dim code17 As String = "
+Public Module TestModule
+    Public Function ReadConfig() As String
+        ' This code won't actually run due to missing reference,
+        ' but analysis will detect the potential security concern
+        Dim content As String = System.IO.File.ReadAllText(""config.txt"")
+        Return content
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code17)
+        System.Console.WriteLine("Analysis: COMPREHENSIVE (includes security checks)")
+        Dim result17 As String = VBCodeExecutor.ExecuteVBCode(code17, analysisComprehensive)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result17)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 18: Code Analysis - Catching errors before execution")
+        System.Console.WriteLine("-------------------------------------------------------------")
+        Dim code18 As String = "
+Public Module TestModule
+    Public Function BadCode() As Integer
+        Return undefinedVariable + 10
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code18)
+        System.Console.WriteLine("Analysis: ENABLED (will catch the error)")
+        Dim result18 As String = VBCodeExecutor.ExecuteVBCode(code18, analysisBasic)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result18)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 19: Code Analysis - Custom configuration")
+        System.Console.WriteLine("-------------------------------------------------")
+        Dim code19 As String = "
+Public Module TestModule
+    Public Function CustomTest() As String
+        Dim message As String = ""Hello from analyzed code!""
+        Console.WriteLine(message)
+        Return message.ToUpper()
+    End Function
+End Module
+"
+        System.Console.WriteLine("Code to execute:")
+        System.Console.WriteLine(code19)
+        System.Console.WriteLine("Analysis: CUSTOM (only complexity reporting, no syntax/semantic checks)")
+        Dim customAnalysis As New CodeAnalysisOptions With {
+            .Enabled = True,
+            .CheckSyntax = False,
+            .CheckSemantics = False,
+            .CheckSecurity = False,
+            .ReportComplexity = True
+        }
+        Dim result19 As String = VBCodeExecutor.ExecuteVBCode(code19, customAnalysis)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result19)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("=== All examples completed (including code analysis) ===")
     End Sub
 End Module
