@@ -15,7 +15,7 @@ Public Module VBCodeExecutor
 
         Public Overrides Sub Write(value As Char)
             _buffer.Append(value)
-            If value = ControlChars.Lf Then
+            If value = Microsoft.VisualBasic.ControlChars.Lf Then
                 Flush()
             End If
         End Sub
@@ -45,7 +45,7 @@ Public Module VBCodeExecutor
             Dim modifiedCode As String = InjectVariables(vbCodeString, variables)
             Return ExecuteVBCodeInternal(modifiedCode, Nothing, customLogger)
         Catch ex As System.Exception
-            Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
+            Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
         End Try
     End Function
 
@@ -65,7 +65,7 @@ Public Module VBCodeExecutor
         Dim variableDeclarations As New System.Text.StringBuilder()
         variableDeclarations.AppendLine()
 
-        For Each kvp In variables
+        For Each kvp As System.Collections.Generic.KeyValuePair(Of String, Object) In variables
             Dim varName As String = kvp.Key
             Dim varValue As Object = kvp.Value
 
@@ -103,8 +103,8 @@ Public Module VBCodeExecutor
         End If
 
         If moduleStartIndex >= 0 Then
-            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(vbLf, moduleStartIndex)
-            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(vbCr, moduleStartIndex)
+            Dim moduleLineEnd As Integer = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Lf, moduleStartIndex)
+            If moduleLineEnd = -1 Then moduleLineEnd = vbCodeString.IndexOf(Microsoft.VisualBasic.ControlChars.Cr, moduleStartIndex)
 
             If moduleLineEnd >= 0 Then
                 Return vbCodeString.Substring(0, moduleLineEnd + 1) &
@@ -153,7 +153,7 @@ Public Module VBCodeExecutor
 
                     Dim errorBuilder As New System.Text.StringBuilder()
                     errorBuilder.AppendLine("Compilation Errors:")
-                    For Each diagnostic In failures
+                    For Each diagnostic As Microsoft.CodeAnalysis.Diagnostic In failures
                         errorBuilder.AppendLine($"  {diagnostic.Id}: {diagnostic.GetMessage()}")
                     Next
 
@@ -231,13 +231,13 @@ Public Module VBCodeExecutor
                         System.Console.SetOut(originalOut)
                         System.Console.SetError(originalError)
                         Dim errorMessage As String = If(ex.InnerException IsNot Nothing, ex.InnerException.Message, ex.Message)
-                        Return $"Runtime Error: {errorMessage}" & vbCrLf & ex.StackTrace
+                        Return $"Runtime Error: {errorMessage}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
                     End Try
                 End If
             End Using
 
         Catch ex As System.Exception
-            Return $"Fatal Error: {ex.Message}" & vbCrLf & ex.StackTrace
+            Return $"Fatal Error: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
         End Try
     End Function
 
