@@ -275,6 +275,71 @@ End Module
         Next
         System.Console.WriteLine()
 
+        System.Console.WriteLine("Example 14: Execute VB file with Main function")
+        System.Console.WriteLine("-----------------------------------------------")
+        Dim testFilePath As String = "TestMainEntry.vb"
+        System.Console.WriteLine($"Executing file: {testFilePath}")
+        Dim result14 As String = VBCodeExecutor.ExecuteVBFile(testFilePath)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result14)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 15: Execute VB file with Main function and parameters")
+        System.Console.WriteLine("--------------------------------------------------------------")
+        System.Console.WriteLine($"Executing file: {testFilePath}")
+        System.Console.WriteLine("Parameters: ""TestUser"", 3")
+        ' Note: Since we're calling Main, we need to use ExecuteVBCode with the file content
+        ' For parameters, we'll demonstrate reading the file and using a different function
+        Dim fileCode As String = System.IO.File.ReadAllText(testFilePath)
+        Dim result15 As String = VBCodeExecutor.ExecuteVBCode(fileCode, "MainWithParams", "TestUser", 3)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result15)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 16: Execute VB file with calculation function")
+        System.Console.WriteLine("-------------------------------------------------------")
+        System.Console.WriteLine($"Executing file: {testFilePath}")
+        System.Console.WriteLine("Calling Calculate with: 25.5, 10.0, ""*""")
+        Dim result16 As String = VBCodeExecutor.ExecuteVBCode(fileCode, "Calculate", 25.5, 10.0, "*")
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result16)
+        System.Console.WriteLine()
+
+        System.Console.WriteLine("Example 17: Execute VB file with variables injection")
+        System.Console.WriteLine("-----------------------------------------------------")
+        Dim fileWithVarsPath As String = "TestFileWithVariables.vb"
+
+        ' Create a test file that uses variables
+        Dim testCodeWithVars As String = "
+Public Module TestModule
+    Public Function Main() As String
+        Console.WriteLine($""Name: {userName}"")
+        Console.WriteLine($""Age: {userAge}"")
+        Console.WriteLine($""Score: {userScore}"")
+        Return $""{userName} is {userAge} years old with score {userScore}""
+    End Function
+End Module
+"
+        System.IO.File.WriteAllText(fileWithVarsPath, testCodeWithVars)
+
+        Dim fileVars As New System.Collections.Generic.Dictionary(Of String, Object) From {
+            {"userName", "Alice"},
+            {"userAge", 28},
+            {"userScore", 95.5}
+        }
+
+        System.Console.WriteLine($"Executing file: {fileWithVarsPath}")
+        System.Console.WriteLine("Variables: userName=""Alice"", userAge=28, userScore=95.5")
+        Dim result17 As String = VBCodeExecutor.ExecuteVBFileWithVariables(fileWithVarsPath, fileVars)
+        System.Console.WriteLine("Output:")
+        System.Console.WriteLine(result17)
+        System.Console.WriteLine()
+
+        ' Clean up test file
+        If System.IO.File.Exists(fileWithVarsPath) Then
+            System.IO.File.Delete(fileWithVarsPath)
+        End If
+
         System.Console.WriteLine("=== All examples completed ===")
     End Sub
 End Module
