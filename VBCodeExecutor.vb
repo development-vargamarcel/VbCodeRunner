@@ -87,6 +87,73 @@ Public Module VBCodeExecutor
         Return ExecuteVBCodeInternal(vbCodeString, parameters, entryPointName, Nothing)
     End Function
 
+    ''' <summary>
+    ''' Executes a VB file from the given path and calls the Main function
+    ''' </summary>
+    ''' <param name="filePath">The path to the VB file to execute</param>
+    ''' <param name="parameters">Optional parameters to pass to the Main function</param>
+    ''' <returns>The execution result as a string</returns>
+    Public Function ExecuteVBFile(filePath As String, ParamArray parameters As Object()) As String
+        Return ExecuteVBFile(filePath, Nothing, parameters)
+    End Function
+
+    ''' <summary>
+    ''' Executes a VB file from the given path and calls the Main function with custom logger
+    ''' </summary>
+    ''' <param name="filePath">The path to the VB file to execute</param>
+    ''' <param name="customLogger">Optional custom logger for output</param>
+    ''' <param name="parameters">Optional parameters to pass to the Main function</param>
+    ''' <returns>The execution result as a string</returns>
+    Public Function ExecuteVBFile(filePath As String, customLogger As System.Action(Of String), ParamArray parameters As Object()) As String
+        Try
+            ' Check if file exists
+            If Not System.IO.File.Exists(filePath) Then
+                Return $"Error: File not found at path: {filePath}"
+            End If
+
+            ' Read the VB code from the file
+            Dim vbCodeString As String = System.IO.File.ReadAllText(filePath)
+
+            ' Execute the code with "Main" as the entry point
+            Return ExecuteVBCodeInternal(vbCodeString, parameters, "Main", customLogger)
+
+        Catch ex As System.Exception
+            Return $"Error reading or executing file: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
+        End Try
+    End Function
+
+    ''' <summary>
+    ''' Executes a VB file from the given path and calls the Main function with variables
+    ''' </summary>
+    ''' <param name="filePath">The path to the VB file to execute</param>
+    ''' <param name="variables">Dictionary of variables to inject into the code</param>
+    ''' <param name="customLogger">Optional custom logger for output</param>
+    ''' <returns>The execution result as a string</returns>
+    Public Function ExecuteVBFileWithVariables(filePath As String, variables As System.Collections.Generic.Dictionary(Of String, Object), Optional customLogger As System.Action(Of String) = Nothing) As String
+        Dim executionId As String = System.Guid.NewGuid().ToString("N")
+        Try
+            ' Check if file exists
+            If Not System.IO.File.Exists(filePath) Then
+                Return $"Error: File not found at path: {filePath}"
+            End If
+
+            ' Read the VB code from the file
+            Dim vbCodeString As String = System.IO.File.ReadAllText(filePath)
+
+            ' Inject variables into the code
+            Dim modifiedCode As String = InjectVariables(vbCodeString, variables, executionId)
+
+            ' Execute with "Main" as the entry point
+            Dim result As String = ExecuteVBCodeInternal(modifiedCode, Nothing, "Main", customLogger)
+            Return result
+        Catch ex As System.Exception
+            Return $"Error reading or executing file: {ex.Message}" & Microsoft.VisualBasic.ControlChars.CrLf & ex.StackTrace
+        Finally
+            ' Clean up stored objects for this execution
+            CleanupExecution(executionId)
+        End Try
+    End Function
+
     Private Function InjectVariables(vbCodeString As String, variables As System.Collections.Generic.Dictionary(Of String, Object), executionId As String) As String
         If variables Is Nothing OrElse variables.Count = 0 Then
             Return vbCodeString
